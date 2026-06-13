@@ -14,7 +14,7 @@ class BackupRun extends Model
     use HasFactory;
 
     protected $fillable = [
-        'connection_id', 'trigger', 'status', 'databases',
+        'connection_id', 'backup_plan_id', 'trigger', 'status', 'databases',
         'started_at', 'finished_at', 'duration_seconds', 'total_bytes',
         'log', 'error',
     ];
@@ -39,6 +39,14 @@ class BackupRun extends Model
     public function connection(): BelongsTo
     {
         return $this->belongsTo(Connection::class);
+    }
+
+    /**
+     * @return BelongsTo<BackupPlan, $this>
+     */
+    public function plan(): BelongsTo
+    {
+        return $this->belongsTo(BackupPlan::class, 'backup_plan_id');
     }
 
     /**

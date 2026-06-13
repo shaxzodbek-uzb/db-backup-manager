@@ -3,9 +3,11 @@
 namespace App\Jobs;
 
 use App\Concerns\RedactsSecrets;
+use App\Models\BackupPlan;
 use App\Models\BackupRun;
 use App\Models\Connection;
 use App\Services\Backup\DatabaseDumper;
+use App\Services\Backup\RetentionManager;
 use App\Services\Db\DatabaseLister;
 use App\Services\Ssh\SshTunnel;
 use Illuminate\Bus\Queueable;
@@ -33,14 +35,20 @@ class RunBackupJob implements ShouldQueue
         public int $connectionId,
         public array $databases = [],
         public string $trigger = 'manual',
+        public ?int $backupPlanId = null,
     ) {}
 
-    public function handle(DatabaseDumper $dumper, DatabaseLister $lister, SshTunnel $tunnel): void
-    {
+    public function handle(
+        DatabaseDumper $dumper,
+        DatabaseLister $lister,
+        SshTunnel $tunnel,
+        RetentionManager $retention,
+    ): void {
         $connection = Connection::findOrFail($this->connectionId);
 
         $run = BackupRun::create([
             'connection_id' => $connection->id,
+            'backup_plan_id' => $this->backupPlanId,
             'trigger' => $this->trigger,
             'status' => 'running',
             'databases' => $this->databases,
@@ -90,6 +98,13 @@ class RunBackupJob implements ShouldQueue
                 'total_bytes' => $totalBytes,
                 'log' => implode("\n", $log),
             ]);
+
+            if ($this->backupPlanId !== null) {
+                $plan = BackupPlan::find($this->backupPlanId);
+                if ($plan !== null) {
+                    $retention->prune($plan);
+                }
+            }
         } catch (Throwable $e) {
             $run->update([
                 'status' => 'failed',
