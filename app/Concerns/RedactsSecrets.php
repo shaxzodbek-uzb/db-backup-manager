@@ -13,11 +13,22 @@ trait RedactsSecrets
      */
     protected function redactSecrets(string $message, Connection $connection): string
     {
-        $secrets = array_values(array_filter([
+        return $this->redactStrings($message, [
             (string) $connection->password,
             (string) $connection->ssh_password,
             (string) $connection->ssh_passphrase,
-        ], fn (string $secret): bool => $secret !== ''));
+        ]);
+    }
+
+    /**
+     * Strip the given secret strings from a message and collapse it to a single,
+     * length-bounded line.
+     *
+     * @param  list<string>  $secrets
+     */
+    protected function redactStrings(string $message, array $secrets): string
+    {
+        $secrets = array_values(array_filter($secrets, fn (string $secret): bool => $secret !== ''));
 
         if ($secrets !== []) {
             $message = str_replace($secrets, '****', $message);

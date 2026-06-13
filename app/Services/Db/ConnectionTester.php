@@ -4,6 +4,7 @@ namespace App\Services\Db;
 
 use App\Concerns\RedactsSecrets;
 use App\Models\Connection;
+use App\Services\TestResult;
 use Throwable;
 
 class ConnectionTester

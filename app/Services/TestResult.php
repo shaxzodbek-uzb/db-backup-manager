@@ -1,10 +1,12 @@
 <?php
 
-namespace App\Services\Db;
+namespace App\Services;
 
 use Illuminate\Contracts\Support\Arrayable;
 
 /**
+ * Outcome of a connectivity probe (database connection or backup destination).
+ *
  * @implements Arrayable<string, mixed>
  */
 class TestResult implements Arrayable
