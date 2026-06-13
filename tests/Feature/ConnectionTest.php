@@ -181,4 +181,86 @@ class ConnectionTest extends TestCase
             ->get(route('connections.databases', $connection))
             ->assertRedirect();
     }
+
+    public function test_store_requires_ssh_host_and_user_when_ssh_enabled(): void
+    {
+        $this->actingAs($this->admin())
+            ->post(route('connections.store'), [
+                'name' => 'Tunneled',
+                'driver' => 'pgsql',
+                'host' => '10.0.0.5',
+                'port' => 5432,
+                'username' => 'postgres',
+                'ssh_enabled' => true,
+            ])
+            ->assertSessionHasErrors(['ssh_host', 'ssh_user']);
+    }
+
+    public function test_store_rejects_unsupported_ssh_password_auth(): void
+    {
+        $this->actingAs($this->admin())
+            ->post(route('connections.store'), [
+                'name' => 'Tunneled',
+                'driver' => 'pgsql',
+                'host' => '10.0.0.5',
+                'port' => 5432,
+                'username' => 'postgres',
+                'ssh_enabled' => true,
+                'ssh_host' => 'bastion',
+                'ssh_user' => 'tunnel',
+                'ssh_auth' => 'password',
+            ])
+            ->assertSessionHasErrors('ssh_auth');
+    }
+
+    public function test_ssh_private_key_is_encrypted_at_rest_and_hidden(): void
+    {
+        $connection = Connection::factory()->withSshTunnel()->create([
+            'ssh_private_key' => 'PRIVATE-KEY-DATA',
+        ]);
+
+        $raw = DB::table('connections')->where('id', $connection->id)->value('ssh_private_key');
+        $this->assertNotSame('PRIVATE-KEY-DATA', $raw);
+        $this->assertSame('PRIVATE-KEY-DATA', Crypt::decryptString($raw));
+
+        $this->assertArrayNotHasKey('ssh_private_key', $connection->fresh()->toArray());
+    }
+
+    public function test_edit_exposes_ssh_metadata_but_not_the_key(): void
+    {
+        $connection = Connection::factory()->withSshTunnel()->create();
+
+        $this->actingAs($this->admin())
+            ->get(route('connections.edit', $connection))
+            ->assertInertia(fn (AssertableInertia $page) => $page
+                ->component('connections/Form')
+                ->where('connection.ssh_enabled', true)
+                ->where('connection.ssh_host', 'bastion.example.com')
+                ->where('connection.has_ssh_private_key', true)
+                ->missing('connection.ssh_private_key'));
+    }
+
+    public function test_blank_ssh_private_key_keeps_the_existing_one_on_update(): void
+    {
+        $connection = Connection::factory()->withSshTunnel()->create([
+            'ssh_private_key' => 'keep-this-key',
+        ]);
+
+        $this->actingAs($this->admin())
+            ->put(route('connections.update', $connection), [
+                'name' => $connection->name,
+                'driver' => $connection->driver,
+                'host' => $connection->host,
+                'port' => $connection->port,
+                'username' => $connection->username,
+                'ssh_enabled' => true,
+                'ssh_host' => $connection->ssh_host,
+                'ssh_user' => $connection->ssh_user,
+                'ssh_auth' => 'key',
+                'ssh_private_key' => '',
+            ])
+            ->assertRedirect(route('connections.index'));
+
+        $this->assertSame('keep-this-key', $connection->refresh()->ssh_private_key);
+    }
 }

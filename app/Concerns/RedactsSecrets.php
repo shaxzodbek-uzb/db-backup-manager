@@ -17,6 +17,7 @@ trait RedactsSecrets
             (string) $connection->password,
             (string) $connection->ssh_password,
             (string) $connection->ssh_passphrase,
+            (string) $connection->ssh_private_key,
         ]);
     }
 

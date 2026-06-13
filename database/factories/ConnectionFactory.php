@@ -37,4 +37,19 @@ class ConnectionFactory extends Factory
             'username' => 'postgres',
         ]);
     }
+
+    /**
+     * Indicate that the connection reaches the database through an SSH tunnel.
+     */
+    public function withSshTunnel(): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'ssh_enabled' => true,
+            'ssh_host' => 'bastion.example.com',
+            'ssh_port' => 22,
+            'ssh_user' => 'tunnel',
+            'ssh_auth' => 'key',
+            'ssh_private_key' => "-----BEGIN OPENSSH PRIVATE KEY-----\nfake-key-material\n-----END OPENSSH PRIVATE KEY-----",
+        ]);
+    }
 }
