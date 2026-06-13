@@ -263,4 +263,22 @@ class ConnectionTest extends TestCase
 
         $this->assertSame('keep-this-key', $connection->refresh()->ssh_private_key);
     }
+
+    public function test_a_connection_can_be_created_from_a_database_url(): void
+    {
+        $this->actingAs($this->admin())
+            ->post(route('connections.store'), [
+                'name' => 'From URL',
+                'url' => 'postgresql://bob:s3cret@db.example.com:5433/shop',
+            ])
+            ->assertRedirect(route('connections.index'));
+
+        $connection = Connection::firstWhere('name', 'From URL');
+        $this->assertNotNull($connection);
+        $this->assertSame('pgsql', $connection->driver);
+        $this->assertSame('db.example.com', $connection->host);
+        $this->assertSame(5433, $connection->port);
+        $this->assertSame('bob', $connection->username);
+        $this->assertSame('s3cret', $connection->password);
+    }
 }

@@ -2,6 +2,7 @@
 
 namespace App\Concerns;
 
+use App\Support\DatabaseUrlParser;
 use Illuminate\Validation\Rule;
 
 trait ConnectionValidationRules
@@ -39,5 +40,30 @@ trait ConnectionValidationRules
             'ssh_passphrase' => ['nullable', 'string', 'max:1024'],
             'ssh_password' => ['nullable', 'string', 'max:1024'],
         ];
+    }
+
+    /**
+     * Expand a supplied database URL into discrete connection fields before
+     * validation, so a connection can be created from a single DSN string.
+     */
+    protected function applyDatabaseUrl(): void
+    {
+        $url = $this->input('url');
+        if (! is_string($url) || trim($url) === '') {
+            return;
+        }
+
+        $parsed = DatabaseUrlParser::parse($url);
+        if ($parsed === null) {
+            return;
+        }
+
+        $this->merge([
+            'driver' => $parsed['driver'],
+            'host' => $parsed['host'],
+            'port' => $parsed['port'],
+            'username' => $parsed['username'],
+            'password' => $this->filled('password') ? $this->input('password') : $parsed['password'],
+        ]);
     }
 }

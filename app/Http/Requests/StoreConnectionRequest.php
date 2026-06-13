@@ -9,6 +9,11 @@ class StoreConnectionRequest extends FormRequest
 {
     use ConnectionValidationRules;
 
+    protected function prepareForValidation(): void
+    {
+        $this->applyDatabaseUrl();
+    }
+
     /**
      * @return array<string, mixed>
      */

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Head, Link, useForm } from '@inertiajs/vue3';
-import { computed, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
 import Heading from '@/components/Heading.vue';
 import InputError from '@/components/InputError.vue';
 import { Button } from '@/components/ui/button';
@@ -89,6 +89,50 @@ const keyPlaceholder = computed(() =>
 const textareaClass =
     'border-input placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-ring/50 dark:bg-input/30 w-full min-w-0 rounded-md border bg-transparent px-3 py-2 font-mono text-xs shadow-xs transition-[color,box-shadow] outline-none focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50';
 
+const dbUrl = ref('');
+const urlError = ref('');
+
+// Parse a DSN like postgres://user:pass@host:5432/db and fill the fields below.
+function fillFromUrl(): void {
+    const raw = dbUrl.value.trim();
+    if (!raw) {
+        return;
+    }
+
+    let parsed: URL;
+    try {
+        parsed = new URL(raw);
+    } catch {
+        urlError.value = 'That does not look like a valid URL.';
+        return;
+    }
+
+    const scheme = parsed.protocol.replace(':', '').toLowerCase();
+    const driver = ['postgres', 'postgresql', 'pgsql'].includes(scheme)
+        ? 'pgsql'
+        : ['mysql', 'mariadb'].includes(scheme)
+          ? 'mysql'
+          : null;
+
+    if (!driver) {
+        urlError.value = 'Use a postgres:// or mysql:// URL.';
+        return;
+    }
+
+    form.driver = driver;
+    form.host = parsed.hostname;
+    form.port = parsed.port ? Number(parsed.port) : defaultPorts[driver];
+    if (parsed.username) {
+        form.username = decodeURIComponent(parsed.username);
+    }
+    if (parsed.password) {
+        form.password = decodeURIComponent(parsed.password);
+    }
+
+    urlError.value = '';
+    dbUrl.value = '';
+}
+
 function submit(): void {
     if (isEdit.value && props.connection) {
         form.put(update(props.connection.id).url, { preserveScroll: true });
@@ -108,6 +152,31 @@ function submit(): void {
         />
 
         <form class="max-w-2xl space-y-6" @submit.prevent="submit">
+            <div
+                v-if="!isEdit"
+                class="grid gap-2 rounded-lg border border-dashed p-4"
+            >
+                <Label for="db_url">Quick add from database URL</Label>
+                <div class="flex flex-col gap-2 sm:flex-row">
+                    <Input
+                        id="db_url"
+                        v-model="dbUrl"
+                        autocomplete="off"
+                        spellcheck="false"
+                        placeholder="postgres://user:password@host:5432/db"
+                        @keydown.enter.prevent="fillFromUrl"
+                    />
+                    <Button type="button" variant="outline" @click="fillFromUrl">
+                        Fill fields
+                    </Button>
+                </div>
+                <p class="text-xs text-muted-foreground">
+                    Paste a connection string to fill the fields below. The URL
+                    isn't stored — only the parsed values.
+                </p>
+                <InputError :message="urlError" />
+            </div>
+
             <div class="grid gap-2">
                 <Label for="name">Name</Label>
                 <Input
