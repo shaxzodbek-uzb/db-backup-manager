@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Link } from '@inertiajs/vue3';
-import { BookOpen, Database, FolderGit2, LayoutGrid } from '@lucide/vue';
+import { BookOpen, Cloud, Database, FolderGit2, LayoutGrid } from '@lucide/vue';
 import AppLogo from '@/components/AppLogo.vue';
 import NavFooter from '@/components/NavFooter.vue';
 import NavMain from '@/components/NavMain.vue';
@@ -16,6 +16,7 @@ import {
 } from '@/components/ui/sidebar';
 import { dashboard } from '@/routes';
 import { index as connectionsIndex } from '@/routes/connections';
+import { index as destinationsIndex } from '@/routes/destinations';
 import type { NavItem } from '@/types';
 
 const mainNavItems: NavItem[] = [
@@ -28,6 +29,11 @@ const mainNavItems: NavItem[] = [
         title: 'Connections',
         href: connectionsIndex(),
         icon: Database,
+    },
+    {
+        title: 'Destinations',
+        href: destinationsIndex(),
+        icon: Cloud,
     },
 ];
 
