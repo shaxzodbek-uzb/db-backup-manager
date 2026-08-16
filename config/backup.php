@@ -2,32 +2,58 @@
 
 return [
     /*
-     * Directory containing the dump binaries (pg_dump). Leave null to auto-detect
-     * from PATH and the common Homebrew/libpq locations listed below.
+     * Where each driver's dump binary lives, and how to find it.
+     *
+     * `path` pins the directory outright (skip discovery). `globs` are
+     * version-managed install roots, each holding a <root>/bin/<binary>.
+     * `search_paths` are extra directories tried when the binary is not on PATH.
+     *
+     * PostgreSQL considers every glob match and picks the NEWEST pg_dump, because
+     * pg_dump refuses to dump a server newer than itself — so a Postgres 17 server
+     * is dumped by a 17 client even when an older libpq sits earlier on PATH.
+     * mysqldump has no equivalent rule, so the first match is used and no version
+     * probe is run.
      */
-    'pg_dump_path' => env('PG_DUMP_PATH'),
+    'binaries' => [
+        'pgsql' => [
+            'path' => env('PG_DUMP_PATH'),
 
-    /*
-     * Version-managed install roots (each holds a <root>/bin/pg_dump). Every
-     * match is considered and the newest pg_dump wins — so a Postgres 17 server
-     * is dumped by a 17 client even when an older libpq sits on PATH.
-     */
-    'binary_globs' => [
-        '/Users/Shared/DBngin/postgresql/*',
-        '/opt/homebrew/opt/postgresql@*',
-        '/opt/homebrew/Cellar/postgresql@*/*',
-        '/usr/local/opt/postgresql@*',
-        '/Applications/Postgres.app/Contents/Versions/*',
-    ],
+            'globs' => [
+                '/Users/Shared/DBngin/postgresql/*',
+                '/opt/homebrew/opt/postgresql@*',
+                '/opt/homebrew/Cellar/postgresql@*/*',
+                '/usr/local/opt/postgresql@*',
+                '/Applications/Postgres.app/Contents/Versions/*',
+            ],
 
-    /*
-     * Extra directories searched for the dump binary when it is not on PATH.
-     */
-    'binary_search_paths' => [
-        '/opt/homebrew/opt/libpq/bin',
-        '/usr/local/opt/libpq/bin',
-        '/opt/homebrew/bin',
-        '/usr/local/bin',
+            'search_paths' => [
+                '/opt/homebrew/opt/libpq/bin',
+                '/usr/local/opt/libpq/bin',
+                '/opt/homebrew/bin',
+                '/usr/local/bin',
+            ],
+        ],
+
+        'mysql' => [
+            'path' => env('MYSQLDUMP_PATH'),
+
+            'globs' => [
+                '/Users/Shared/DBngin/mysql/*',
+                '/opt/homebrew/opt/mysql@*',
+                '/opt/homebrew/opt/mysql-client@*',
+                '/usr/local/opt/mysql@*',
+                '/usr/local/opt/mysql-client@*',
+            ],
+
+            'search_paths' => [
+                '/opt/homebrew/opt/mysql-client/bin',
+                '/usr/local/opt/mysql-client/bin',
+                '/opt/homebrew/opt/mariadb/bin',
+                '/opt/homebrew/bin',
+                '/usr/local/bin',
+                '/usr/bin',
+            ],
+        ],
     ],
 
     /*

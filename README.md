@@ -4,11 +4,11 @@ A Laravel 12 + Vue tool for secure, scheduled database backups. Define source da
 **connections**, pick **destinations** (S3 / DigitalOcean Spaces, Telegram, …), schedule
 backup **plans**, and track every **run** and stored **artifact**.
 
-PostgreSQL is the first-class source; MySQL support is planned.
+PostgreSQL and MySQL/MariaDB are both supported as sources.
 
 ## Features
 
-- **Connections** — register source databases, test connectivity, list databases
+- **Connections** — register PostgreSQL or MySQL/MariaDB sources, test connectivity, list databases
 - **Destinations** — configure and test backup targets (S3-compatible storage, Telegram)
 - **Backup plans & runs** — scheduled backups with a full run history
 - **Artifacts** — track each produced dump file
@@ -30,4 +30,9 @@ php artisan migrate
 npm run dev
 ```
 
-> Requires the relevant DB client binaries (e.g. `pg_dump`) on the host for dumps to run.
+> Dumps shell out to the DB client binary, so the host needs `pg_dump` (PostgreSQL)
+> and/or `mysqldump` (MySQL/MariaDB). Both are auto-detected from PATH and the usual
+> Homebrew/DBngin locations; pin them with `PG_DUMP_PATH` / `MYSQLDUMP_PATH` if needed.
+>
+> For PostgreSQL the **newest** `pg_dump` found wins, because `pg_dump` refuses to dump
+> a server newer than itself. `mysqldump` has no such rule, so the first match is used.

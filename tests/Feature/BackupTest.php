@@ -18,10 +18,12 @@ class BackupTest extends TestCase
 
     public function test_dumper_rejects_unsupported_drivers(): void
     {
-        $connection = Connection::factory()->make(['driver' => 'mysql']);
+        // mysql used to land here; it is supported now, so this asserts a driver
+        // that genuinely has no dumper rather than re-asserting a removed limit.
+        $connection = Connection::factory()->make(['driver' => 'sqlite']);
 
         $this->expectException(RuntimeException::class);
-        $this->expectExceptionMessage('not supported yet');
+        $this->expectExceptionMessage('is not supported');
 
         app(DatabaseDumper::class)->dump($connection, 'app', sys_get_temp_dir().'/should-not-exist.sql.gz');
     }
