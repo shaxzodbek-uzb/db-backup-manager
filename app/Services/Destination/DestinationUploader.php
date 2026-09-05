@@ -4,6 +4,7 @@ namespace App\Services\Destination;
 
 use App\Models\Destination;
 use Illuminate\Http\Client\PendingRequest;
+use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 use RuntimeException;
 
@@ -24,6 +25,27 @@ class DestinationUploader
      * months under the old system.
      */
     public const TELEGRAM_MAX_BYTES = 50 * 1024 * 1024;
+
+    /**
+     * Telegram allows roughly 20 messages a minute to one group. Sending a
+     * hundred dumps back to back walks straight into that: a run of 132 had 53
+     * rejected with "Too Many Requests". Spacing the uploads keeps the whole
+     * batch inside the limit instead of racing it and retrying the wreckage.
+     */
+    public const TELEGRAM_MIN_INTERVAL_MS = 3000;
+
+    /**
+     * How many times a rate-limited upload is retried. Telegram says how long
+     * to wait, so these are patient waits rather than blind backoff.
+     */
+    public const TELEGRAM_MAX_ATTEMPTS = 4;
+
+    /**
+     * Unix milliseconds of the last document sent, per chat.
+     *
+     * @var array<string, int>
+     */
+    private array $lastSentAt = [];
 
     public function __construct(private DestinationManager $manager) {}
 
@@ -102,25 +124,7 @@ class DestinationUploader
         $token = (string) ($config['bot_token'] ?? '');
         $chatId = (string) ($config['chat_id'] ?? '');
 
-        $stream = fopen($localPath, 'rb');
-
-        if ($stream === false) {
-            throw new RuntimeException("Dump file [{$localPath}] could not be opened for upload.");
-        }
-
-        try {
-            $response = $this->telegramClient()
-                ->attach('document', $stream, basename($remotePath))
-                ->post("https://api.telegram.org/bot{$token}/sendDocument", [
-                    'chat_id' => $chatId,
-                    'caption' => $remotePath,
-                    'disable_notification' => 'true',
-                ]);
-        } finally {
-            if (is_resource($stream)) {
-                fclose($stream);
-            }
-        }
+        $response = $this->sendDocument($token, $chatId, $localPath, $remotePath);
 
         if (! $response->ok() || $response->json('ok') !== true) {
             throw new RuntimeException(
@@ -148,6 +152,104 @@ class DestinationUploader
         }
 
         return $fileId;
+    }
+
+    /**
+     * Posts the document, waiting out the rate limit when Telegram asks.
+     *
+     * Only 429 is retried: a wrong chat id would otherwise take four times as
+     * long to report the same thing.
+     */
+    private function sendDocument(string $token, string $chatId, string $localPath, string $remotePath): Response
+    {
+        for ($attempt = 1; ; $attempt++) {
+            $this->pauseForRateLimit($chatId);
+
+            $stream = fopen($localPath, 'rb');
+
+            if ($stream === false) {
+                throw new RuntimeException("Dump file [{$localPath}] could not be opened for upload.");
+            }
+
+            try {
+                $response = $this->telegramClient()
+                    ->attach('document', $stream, basename($remotePath))
+                    ->post("https://api.telegram.org/bot{$token}/sendDocument", [
+                        'chat_id' => $chatId,
+                        'caption' => $remotePath,
+                        'disable_notification' => 'true',
+                    ]);
+            } finally {
+                if (is_resource($stream)) {
+                    fclose($stream);
+                }
+            }
+
+            $this->lastSentAt[$chatId] = (int) (microtime(true) * 1000);
+
+            $retryAfter = $this->retryAfterSeconds($response);
+
+            if ($retryAfter === null) {
+                return $response;
+            }
+
+            if ($attempt >= self::TELEGRAM_MAX_ATTEMPTS) {
+                throw new RuntimeException(sprintf(
+                    'Telegram is rate limiting this chat: still refused after %d attempts (last wait %ds).',
+                    $attempt,
+                    $retryAfter,
+                ));
+            }
+
+            // Telegram names the wait; a second on top absorbs clock skew.
+            $this->sleepSeconds($retryAfter + 1);
+        }
+    }
+
+    /**
+     * Returns the seconds Telegram asked us to wait, or null if it did not.
+     */
+    private function retryAfterSeconds(Response $response): ?int
+    {
+        if ($response->status() !== 429) {
+            return null;
+        }
+
+        $retryAfter = $response->json('parameters.retry_after');
+
+        return is_numeric($retryAfter) ? (int) $retryAfter : 1;
+    }
+
+    /**
+     * Holds the next upload back far enough to stay under the per-chat limit.
+     */
+    private function pauseForRateLimit(string $chatId): void
+    {
+        $last = $this->lastSentAt[$chatId] ?? null;
+
+        if ($last === null) {
+            return;
+        }
+
+        $elapsed = (int) (microtime(true) * 1000) - $last;
+        $remaining = self::TELEGRAM_MIN_INTERVAL_MS - $elapsed;
+
+        if ($remaining > 0) {
+            $this->sleepMilliseconds($remaining);
+        }
+    }
+
+    /**
+     * Both waits go through these so tests can run without real delays.
+     */
+    protected function sleepSeconds(int $seconds): void
+    {
+        sleep($seconds);
+    }
+
+    protected function sleepMilliseconds(int $milliseconds): void
+    {
+        usleep($milliseconds * 1000);
     }
 
     private function telegramClient(): PendingRequest
