@@ -16,7 +16,7 @@ class BackupArtifact extends Model
     use SoftDeletes;
 
     protected $fillable = [
-        'backup_run_id', 'database', 'disk', 'path',
+        'backup_run_id', 'destination_id', 'database', 'disk', 'path',
         'size_bytes', 'checksum', 'compressed',
     ];
 
@@ -37,5 +37,24 @@ class BackupArtifact extends Model
     public function run(): BelongsTo
     {
         return $this->belongsTo(BackupRun::class, 'backup_run_id');
+    }
+
+    /**
+     * Where this artifact actually lives. Null means the local staging disk.
+     *
+     * @return BelongsTo<Destination, $this>
+     */
+    public function destination(): BelongsTo
+    {
+        return $this->belongsTo(Destination::class);
+    }
+
+    /**
+     * True when the dump was shipped off the machine that produced it, which
+     * is the only state that survives losing that machine.
+     */
+    public function isRemote(): bool
+    {
+        return $this->destination_id !== null;
     }
 }

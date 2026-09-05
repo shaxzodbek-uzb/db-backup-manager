@@ -2,7 +2,11 @@
 
 namespace App\Services\Backup;
 
+use App\Models\BackupArtifact;
 use App\Models\BackupPlan;
+use App\Services\Destination\DestinationManager;
+use Illuminate\Support\Facades\Log;
+use Throwable;
 
 /**
  * Applies a plan's retention policy by deleting the dump *files* of runs that
@@ -11,6 +15,8 @@ use App\Models\BackupPlan;
  */
 class RetentionManager
 {
+    public function __construct(private DestinationManager $destinations) {}
+
     public function prune(BackupPlan $plan): void
     {
         if ($plan->retention_copies === null && $plan->retention_days === null) {
@@ -20,7 +26,7 @@ class RetentionManager
         $runs = $plan->runs()
             ->whereIn('status', ['success', 'partial'])
             ->orderByDesc('id')
-            ->with('artifacts')
+            ->with('artifacts.destination')
             ->get();
 
         $keepIdsByCount = $plan->retention_copies !== null
@@ -40,12 +46,50 @@ class RetentionManager
             }
 
             foreach ($run->artifacts as $artifact) {
+                $this->forget($artifact);
+            }
+        }
+    }
+
+    /**
+     * Deletes one artifact's bytes, wherever they live.
+     *
+     * The row is dropped even when the bytes could not be removed. Keeping it
+     * would mean the same failing delete is retried on every run forever, and
+     * the row's real purpose — telling you a backup exists — is already false
+     * once retention has decided it should not.
+     */
+    private function forget(BackupArtifact $artifact): void
+    {
+        try {
+            if ($artifact->isRemote()) {
+                $destination = $artifact->destination;
+
+                if ($destination !== null) {
+                    $this->destinations->disk($destination)->delete($artifact->path);
+                } else {
+                    // The destination record was deleted out from under us, so
+                    // the object's location is no longer knowable from here.
+                    Log::warning('Retention could not reach a remote artifact: its destination is gone.', [
+                        'artifact_id' => $artifact->id,
+                        'path' => $artifact->path,
+                    ]);
+                }
+            } else {
                 $full = storage_path('app/'.$artifact->path);
+
                 if (is_file($full)) {
                     @unlink($full);
                 }
-                $artifact->delete();
             }
+        } catch (Throwable $e) {
+            Log::warning('Retention failed to delete a backup artifact.', [
+                'artifact_id' => $artifact->id,
+                'path' => $artifact->path,
+                'error' => $e->getMessage(),
+            ]);
         }
+
+        $artifact->delete();
     }
 }
