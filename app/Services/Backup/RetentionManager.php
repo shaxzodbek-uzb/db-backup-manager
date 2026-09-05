@@ -5,6 +5,7 @@ namespace App\Services\Backup;
 use App\Models\BackupArtifact;
 use App\Models\BackupPlan;
 use App\Services\Destination\DestinationManager;
+use App\Services\Destination\DestinationUploader;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 
@@ -15,7 +16,10 @@ use Throwable;
  */
 class RetentionManager
 {
-    public function __construct(private DestinationManager $destinations) {}
+    public function __construct(
+        private DestinationManager $destinations,
+        private DestinationUploader $uploader,
+    ) {}
 
     public function prune(BackupPlan $plan): void
     {
@@ -65,7 +69,16 @@ class RetentionManager
             if ($artifact->isRemote()) {
                 $destination = $artifact->destination;
 
-                if ($destination !== null) {
+                if ($destination !== null && ! $this->uploader->supportsDeletion($destination)) {
+                    // Telegram: a bot can only delete its own messages for 48
+                    // hours, so the document stays in the chat. Dropping the row
+                    // is still right — retention has decided this copy is not
+                    // one we track any more.
+                    Log::info('Retention left a document in place: its destination cannot delete.', [
+                        'artifact_id' => $artifact->id,
+                        'destination' => $destination->name,
+                    ]);
+                } elseif ($destination !== null) {
                     $this->destinations->disk($destination)->delete($artifact->path);
                 } else {
                     // The destination record was deleted out from under us, so

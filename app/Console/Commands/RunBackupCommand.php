@@ -12,7 +12,7 @@ class RunBackupCommand extends Command
     protected $signature = 'backups:run
         {connection : The connection id}
         {--database=* : Specific databases to back up (default: all)}
-        {--destination= : Destination id to upload to (omit to keep the dumps local)}
+        {--destination=* : Destination ids to upload to; repeat for several (omit to keep the dumps local)}
         {--sync : Run immediately instead of queueing}';
 
     protected $description = 'Back up all or selected databases on a connection';
@@ -27,22 +27,25 @@ class RunBackupCommand extends Command
             return self::FAILURE;
         }
 
-        $destinationId = $this->option('destination');
+        $destinationIds = array_values(array_filter(
+            array_map('strval', (array) $this->option('destination')),
+            fn (string $id): bool => $id !== '',
+        ));
 
-        if ($destinationId !== null && $destinationId !== '') {
-            if (Destination::find($destinationId) === null) {
-                $this->error("Destination [{$destinationId}] not found.");
+        /** @var list<int> $found */
+        $found = array_map('intval', Destination::whereIn('id', $destinationIds)->pluck('id')->all());
+        $missing = array_diff($destinationIds, array_map('strval', $found));
 
-                return self::FAILURE;
-            }
-        } else {
-            $destinationId = null;
+        if ($missing !== []) {
+            $this->error('Destination ['.implode(', ', $missing).'] not found.');
+
+            return self::FAILURE;
         }
 
         /** @var list<string> $databases */
         $databases = $this->option('database');
 
-        $job = new RunBackupJob($connection->id, $databases, 'manual', null, $destinationId !== null ? (int) $destinationId : null);
+        $job = new RunBackupJob($connection->id, $databases, 'manual', null, $found);
 
         if ($this->option('sync')) {
             $this->info("Backing up [{$connection->name}]…");

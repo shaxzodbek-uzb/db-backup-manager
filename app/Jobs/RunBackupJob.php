@@ -3,7 +3,6 @@
 namespace App\Jobs;
 
 use App\Concerns\RedactsSecrets;
-use App\Models\BackupArtifact;
 use App\Models\BackupPlan;
 use App\Models\BackupRun;
 use App\Models\Connection;
@@ -11,13 +10,14 @@ use App\Models\Destination;
 use App\Services\Backup\DatabaseDumper;
 use App\Services\Backup\RetentionManager;
 use App\Services\Db\DatabaseLister;
-use App\Services\Destination\DestinationManager;
+use App\Services\Destination\DestinationUploader;
 use App\Services\Ssh\SshTunnel;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Collection;
 use RuntimeException;
 use Throwable;
 
@@ -34,17 +34,17 @@ class RunBackupJob implements ShouldQueue
 
     /**
      * @param  list<string>  $databases  Empty = every database on the server.
-     * @param  int|null  $destinationId  Where the dumps are shipped. Null keeps
-     *                                   them on the local staging disk, which
-     *                                   only survives failures that leave this
-     *                                   machine intact.
+     * @param  list<int>  $destinationIds  Everywhere the dumps are shipped. Empty
+     *                                     keeps them on the local staging disk,
+     *                                     which only survives failures that
+     *                                     leave this machine intact.
      */
     public function __construct(
         public int $connectionId,
         public array $databases = [],
         public string $trigger = 'manual',
         public ?int $backupPlanId = null,
-        public ?int $destinationId = null,
+        public array $destinationIds = [],
     ) {}
 
     public function handle(
@@ -52,21 +52,21 @@ class RunBackupJob implements ShouldQueue
         DatabaseLister $lister,
         SshTunnel $tunnel,
         RetentionManager $retention,
-        DestinationManager $destinations,
+        DestinationUploader $uploader,
     ): void {
         $connection = Connection::findOrFail($this->connectionId);
 
         // Resolved before the first dump: an hour of pg_dump is wasted if the
-        // bucket it is meant to land in does not exist, and the failure then
-        // reads as a broken database rather than a destination nobody finished
+        // places it is meant to land do not exist, and the failure then reads
+        // as a broken database rather than a destination nobody finished
         // setting up.
-        $destination = $this->destinationId !== null
-            ? Destination::find($this->destinationId)
-            : null;
+        $destinations = Destination::whereIn('id', $this->destinationIds)->get();
 
-        if ($this->destinationId !== null && $destination === null) {
+        $missing = array_diff($this->destinationIds, $destinations->pluck('id')->all());
+
+        if ($missing !== []) {
             throw new RuntimeException(
-                "Destination [{$this->destinationId}] no longer exists — refusing to run a backup with nowhere to put it."
+                'Destination ['.implode(', ', $missing).'] no longer exists — refusing to run a backup with nowhere to put it.'
             );
         }
 
@@ -100,11 +100,11 @@ class RunBackupJob implements ShouldQueue
                     $dumper->dump($connection, $database, $staging, $endpoint);
                     $size = (int) (@filesize($staging) ?: 0);
 
-                    $artifact = $this->store(
+                    $delivered = $this->store(
                         $run,
                         $connection,
-                        $destination,
                         $destinations,
+                        $uploader,
                         $database,
                         $staging,
                         $size,
@@ -115,7 +115,7 @@ class RunBackupJob implements ShouldQueue
                         'OK   %s (%s) → %s',
                         $database,
                         $this->humanBytes($size),
-                        $artifact->isRemote() ? $destination->name ?? 'destination' : 'local',
+                        $delivered,
                     );
                 } catch (Throwable $e) {
                     $failed++;
@@ -158,74 +158,65 @@ class RunBackupJob implements ShouldQueue
     }
 
     /**
-     * Records the finished dump, shipping it to the destination when there is
-     * one.
+     * Records the finished dump and ships it everywhere it is meant to go.
      *
-     * The upload is verified rather than assumed: Flysystem reports a write as
-     * successful the moment the SDK call returns, so the object's size is read
-     * back and compared with the file that was sent. A truncated upload that is
-     * recorded as a backup is the failure this whole command exists to prevent.
+     * Delivery to every destination must succeed. A partial delivery is
+     * reported as a failed database rather than a success with a footnote: the
+     * whole point of a second destination is that the first one might be the
+     * thing that is lost, so "it made it to one of them" is not the outcome
+     * that was asked for.
      *
-     * The staging file is removed only once the object is known to be there.
+     * The staging file is removed only once every copy is confirmed.
+     *
+     * @param  Collection<int, Destination>  $destinations
+     * @return string human-readable list of where it landed, for the run log
      */
     private function store(
         BackupRun $run,
         Connection $connection,
-        ?Destination $destination,
-        DestinationManager $destinations,
+        $destinations,
+        DestinationUploader $uploader,
         string $database,
         string $staging,
         int $size,
-    ): BackupArtifact {
+    ): string {
         $relative = $this->relativePath($connection, $run, $database);
 
-        if ($destination === null) {
-            return $run->artifacts()->create([
+        if ($destinations->isEmpty()) {
+            $run->artifacts()->create([
                 'database' => $database,
                 'disk' => 'local',
                 'path' => $relative,
                 'size_bytes' => $size,
                 'compressed' => true,
             ]);
+
+            return 'local';
         }
 
-        $disk = $destinations->disk($destination, DestinationManager::UPLOAD_TIMEOUT);
-        $stream = fopen($staging, 'rb');
+        $created = [];
 
-        if ($stream === false) {
-            throw new RuntimeException("Dump file [{$staging}] could not be opened for upload.");
-        }
+        foreach ($destinations as $destination) {
+            // Not wrapped: a failure here propagates and the caller records the
+            // database as failed. Artifacts already written for earlier
+            // destinations stay — those copies genuinely exist.
+            $storedPath = $uploader->upload($destination, $staging, $relative, $size);
 
-        try {
-            $disk->writeStream($relative, $stream);
-        } finally {
-            if (is_resource($stream)) {
-                fclose($stream);
-            }
-        }
+            $run->artifacts()->create([
+                'destination_id' => $destination->id,
+                'database' => $database,
+                'disk' => $destination->type,
+                'path' => $storedPath,
+                'size_bytes' => $size,
+                'compressed' => true,
+            ]);
 
-        $uploaded = (int) $disk->size($relative);
-
-        if ($uploaded !== $size) {
-            // Leave the staging copy in place: it is now the only complete one.
-            throw new RuntimeException(sprintf(
-                'Upload of %s is %d bytes but the dump is %d — the copy at the destination is incomplete.',
-                $database,
-                $uploaded,
-                $size,
-            ));
+            $created[] = $destination->name;
         }
 
         @unlink($staging);
 
-        return $run->artifacts()->create([
-            'destination_id' => $destination->id,
-            'database' => $database,
-            'disk' => $destination->type,
-            'path' => $relative,
-            'size_bytes' => $size,
-            'compressed' => true,
-        ]);
+        return implode(' + ', $created);
     }
 
     private function resolveStatus(int $total, int $failed): string

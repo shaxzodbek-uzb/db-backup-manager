@@ -10,7 +10,6 @@ use App\Models\Destination;
 use App\Services\Backup\DatabaseDumper;
 use App\Services\Backup\RetentionManager;
 use App\Services\Destination\DestinationManager;
-use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Storage;
 use Mockery;
@@ -62,7 +61,7 @@ class BackupUploadTest extends TestCase
         $connection = Connection::factory()->postgres()->create();
         $destination = Destination::factory()->create();
 
-        dispatch_sync(new RunBackupJob($connection->id, ['app'], 'manual', null, $destination->id));
+        dispatch_sync(new RunBackupJob($connection->id, ['app'], 'manual', null, [$destination->id]));
 
         $run = BackupRun::firstOrFail();
         $this->assertSame('success', $run->status);
@@ -111,7 +110,7 @@ class BackupUploadTest extends TestCase
         $connection = Connection::factory()->postgres()->create();
         $destination = Destination::factory()->create();
 
-        dispatch_sync(new RunBackupJob($connection->id, ['app'], 'manual', null, $destination->id));
+        dispatch_sync(new RunBackupJob($connection->id, ['app'], 'manual', null, [$destination->id]));
 
         $run = BackupRun::firstOrFail();
 
@@ -131,7 +130,7 @@ class BackupUploadTest extends TestCase
         $this->expectExceptionMessage('nowhere to put it');
 
         try {
-            dispatch_sync(new RunBackupJob($connection->id, ['app'], 'manual', null, 9999));
+            dispatch_sync(new RunBackupJob($connection->id, ['app'], 'manual', null, [9999]));
         } finally {
             // Nothing was dumped: the job never got past resolving where it goes.
             $this->assertSame(0, BackupRun::count());
