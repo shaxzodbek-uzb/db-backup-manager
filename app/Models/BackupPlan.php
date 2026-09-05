@@ -8,6 +8,7 @@ use DateTimeInterface;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class BackupPlan extends Model
@@ -16,7 +17,7 @@ class BackupPlan extends Model
     use HasFactory;
 
     protected $fillable = [
-        'name', 'connection_id', 'destination_id', 'selection',
+        'name', 'connection_id', 'selection',
         'databases', 'exclude_databases', 'cron', 'timezone',
         'retention_days', 'retention_copies', 'enabled',
         'last_run_at', 'next_run_at',
@@ -47,11 +48,16 @@ class BackupPlan extends Model
     }
 
     /**
-     * @return BelongsTo<Destination, $this>
+     * Everywhere this plan's dumps are delivered.
+     *
+     * A plan with none still runs — the dumps stay on the local staging disk,
+     * which only survives failures that leave this machine intact.
+     *
+     * @return BelongsToMany<Destination, $this>
      */
-    public function destination(): BelongsTo
+    public function destinations(): BelongsToMany
     {
-        return $this->belongsTo(Destination::class);
+        return $this->belongsToMany(Destination::class)->withTimestamps();
     }
 
     /**

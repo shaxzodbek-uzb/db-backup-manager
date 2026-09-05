@@ -17,12 +17,18 @@ class DispatchDueBackupsCommand extends Command
         $now = now();
         $dispatched = 0;
 
-        foreach (BackupPlan::query()->where('enabled', true)->get() as $plan) {
+        foreach (BackupPlan::query()->with('destinations')->where('enabled', true)->get() as $plan) {
             if (! $plan->isDue($now)) {
                 continue;
             }
 
-            RunBackupJob::dispatch($plan->connection_id, $plan->databasesForBackup(), 'scheduled', $plan->id, $plan->destination_id);
+            RunBackupJob::dispatch(
+                $plan->connection_id,
+                $plan->databasesForBackup(),
+                'scheduled',
+                $plan->id,
+                array_values(array_map('intval', $plan->destinations->pluck('id')->all())),
+            );
 
             $plan->forceFill([
                 'last_run_at' => $now,
