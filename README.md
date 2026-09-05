@@ -36,3 +36,25 @@ npm run dev
 >
 > For PostgreSQL the **newest** `pg_dump` found wins, because `pg_dump` refuses to dump
 > a server newer than itself. `mysqldump` has no such rule, so the first match is used.
+
+## The first account
+
+Public sign-up is **off by default** (`REGISTRATION_ENABLED=false`). This app stores the
+database passwords and SSH keys of every server it backs up, so an open `/register` on a
+reachable hostname hands them to whoever finds the URL.
+
+To create the first account, switch it on, sign up, then switch it back off:
+
+```bash
+# .env
+REGISTRATION_ENABLED=true
+php artisan config:cache   # if the config is cached
+# …register at /register, then set it back to false and re-cache
+```
+
+With sign-up off and no mail transport configured, a lost account cannot be recovered
+through the UI. Create one directly instead:
+
+```bash
+php artisan tinker --execute="\App\Models\User::create(['name' => 'Admin', 'email' => 'admin@example.com', 'password' => bcrypt('…')]);"
+```

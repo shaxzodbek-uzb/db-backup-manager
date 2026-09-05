@@ -160,8 +160,20 @@ return [
     |
     */
 
-    'features' => [
-        Features::registration(),
+    'features' => array_values(array_filter([
+        /*
+         * Off unless explicitly switched on.
+         *
+         * This application stores the database passwords and SSH keys of every
+         * server it backs up, so an open /register on a public hostname hands
+         * those to whoever finds the URL. Registration is only needed to create
+         * the very first account: turn it on, sign up, turn it off again.
+         *
+         * With it off and no mail transport configured, a lost account cannot
+         * be recovered through the UI — create one with
+         * `php artisan tinker` instead.
+         */
+        env('REGISTRATION_ENABLED', false) ? Features::registration() : null,
         Features::resetPasswords(),
         Features::emailVerification(),
         Features::twoFactorAuthentication([
@@ -172,6 +184,6 @@ return [
         Features::passkeys([
             'confirmPassword' => true,
         ]),
-    ],
+    ])),
 
 ];
