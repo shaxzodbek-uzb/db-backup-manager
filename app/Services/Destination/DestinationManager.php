@@ -16,17 +16,30 @@ use InvalidArgumentException;
  */
 class DestinationManager
 {
-    public function disk(Destination $destination): Filesystem
+    /**
+     * Request timeout for a probe. Short on purpose: the connectivity test
+     * should say "unreachable" quickly rather than hang the operator.
+     */
+    public const PROBE_TIMEOUT = 30;
+
+    /**
+     * Request timeout for an upload. A database dump is orders of magnitude
+     * larger than the probe object, and cutting a 200 MB upload off at the
+     * probe's 30 seconds would report a healthy bucket as a failed backup.
+     */
+    public const UPLOAD_TIMEOUT = 3600;
+
+    public function disk(Destination $destination, int $timeout = self::PROBE_TIMEOUT): Filesystem
     {
         return match ($destination->type) {
-            's3' => $this->s3Disk($destination),
+            's3' => $this->s3Disk($destination, $timeout),
             default => throw new InvalidArgumentException(
                 "Destination type [{$destination->type}] is not a filesystem disk."
             ),
         };
     }
 
-    private function s3Disk(Destination $destination): Filesystem
+    private function s3Disk(Destination $destination, int $timeout): Filesystem
     {
         $config = $destination->config ?? [];
 
@@ -42,7 +55,7 @@ class DestinationManager
             'throw' => true,
             // Fail fast instead of the SDK's default multi-retry backoff.
             'retries' => 0,
-            'http' => ['connect_timeout' => 5, 'timeout' => 30],
+            'http' => ['connect_timeout' => 5, 'timeout' => $timeout],
         ]);
     }
 }

@@ -22,7 +22,7 @@ class DispatchDueBackupsCommand extends Command
                 continue;
             }
 
-            RunBackupJob::dispatch($plan->connection_id, $plan->databasesForBackup(), 'scheduled', $plan->id);
+            RunBackupJob::dispatch($plan->connection_id, $plan->databasesForBackup(), 'scheduled', $plan->id, $plan->destination_id);
 
             $plan->forceFill([
                 'last_run_at' => $now,
