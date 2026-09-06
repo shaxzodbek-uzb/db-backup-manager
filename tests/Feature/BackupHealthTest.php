@@ -25,6 +25,12 @@ class BackupHealthTest extends TestCase
     /** Plans run nightly at 23:15 UTC; "now" is the following midday. */
     private const NOW = '2026-09-07 12:00:00';
 
+    /**
+     * `created_at` is pinned rather than left to the clock: a plan younger
+     * than the slot it is measured against has not missed anything, so a
+     * factory default of "now" would quietly change what these tests assert
+     * depending on the day they run.
+     */
     private function nightlyPlan(array $attributes = []): BackupPlan
     {
         return BackupPlan::factory()->create(array_merge([
@@ -32,6 +38,7 @@ class BackupHealthTest extends TestCase
             'cron' => '15 23 * * *',
             'timezone' => 'UTC',
             'enabled' => true,
+            'created_at' => Carbon::parse('2026-09-01 00:00:00'),
         ], $attributes));
     }
 
@@ -122,6 +129,27 @@ class BackupHealthTest extends TestCase
         $health = $this->checkAt('2026-09-07 00:15:00');
 
         $this->assertTrue($health[0]->healthy());
+    }
+
+    /**
+     * A plan is at its most watched on the day it is created, and that is the
+     * day it has no history at all.
+     */
+    public function test_a_plan_created_after_the_last_slot_has_not_missed_it(): void
+    {
+        $this->nightlyPlan(['created_at' => Carbon::parse('2026-09-07 09:00:00')]);
+
+        $health = $this->checkAt();
+
+        $this->assertTrue($health[0]->healthy());
+        $this->assertNull($health[0]->lastGood);
+    }
+
+    public function test_a_plan_older_than_the_slot_with_no_runs_is_stale(): void
+    {
+        $this->nightlyPlan(['created_at' => Carbon::parse('2026-09-01 09:00:00')]);
+
+        $this->assertFalse($this->checkAt()[0]->healthy());
     }
 
     public function test_a_disabled_plan_is_not_watched(): void

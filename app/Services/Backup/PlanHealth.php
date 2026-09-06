@@ -28,6 +28,23 @@ class PlanHealth
      */
     public function healthy(): bool
     {
+        return $this->delivered() || $this->newerThanTheSlot();
+    }
+
+    /**
+     * A plan written after the slot passed cannot have missed it.
+     *
+     * Without this, every plan announces itself as a failed backup between
+     * being created and running for the first time — an alert that is wrong on
+     * the one day somebody is definitely watching.
+     */
+    public function newerThanTheSlot(): bool
+    {
+        return $this->plan->created_at?->greaterThan($this->expectedSince) === true;
+    }
+
+    private function delivered(): bool
+    {
         return $this->lastGood?->started_at !== null
             && $this->lastGood->started_at->greaterThanOrEqualTo($this->expectedSince);
     }
