@@ -92,6 +92,8 @@ class CheckBackupHealthCommand extends Command
         return match (true) {
             ! $plan->healthy() => "✗ {$plan->plan->name}: last good backup {$last}, expected one since "
                 .$plan->expectedSince->format('Y-m-d H:i').' UTC',
+            $plan->lastGood === null && $plan->newerThanTheSlot() => "· {$plan->plan->name}: "
+                .'newer than the last scheduled run — nothing was due yet',
             $plan->degraded() => "~ {$plan->plan->name}: {$last}, but not every dump reached every destination",
             default => "✓ {$plan->plan->name}: {$last}",
         };
